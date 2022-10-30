@@ -1,47 +1,71 @@
 package server
 
 import (
-	"errors"
-	"fmt"
+	"io"
+	"log"
 	"net"
 	"strconv"
 
 	"github.com/savannahar68/echo-server/config"
 )
 
-func Start(serverConfig config.Server) error {
-	listen, err := net.Listen(serverConfig.Type, serverConfig.IncomingRequest+":"+strconv.Itoa(serverConfig.Port))
+func readCommand(c net.Conn) (string, error) {
+	// TODO: Max read in one shot is 512 bytes
+	// To allow input > 512 bytes, then repeated read until
+	// we get EOF or designated delimiter
+	var buf []byte = make([]byte, 512)
+	n, err := c.Read(buf[:])
 	if err != nil {
-		return errors.Unwrap(err)
+		return "", err
+	}
+	return string(buf[:n]), nil
+}
+
+func respond(cmd string, c net.Conn) error {
+	if _, err := c.Write([]byte(cmd)); err != nil {
+		return err
+	}
+	return nil
+}
+
+func RunSyncTCPServer() {
+	log.Println("starting a synchronous TCP server on", config.Host, config.Port)
+
+	var con_clients int = 0
+
+	// listening to the configured host:port
+	lsnr, err := net.Listen("tcp", config.Host+":"+strconv.Itoa(config.Port))
+	if err != nil {
+		panic(err)
 	}
 
 	for {
-		conn, err := listen.Accept()
+		// blocking call: waiting for the new client to connect
+		c, err := lsnr.Accept()
 		if err != nil {
-			return errors.Unwrap(err)
+			panic(err)
 		}
 
+		// increment the number of concurrent clients
+		con_clients += 1
+		log.Println("client connected with address:", c.RemoteAddr(), "concurrent clients", con_clients)
+
 		for {
-
-			b := make([]byte, 1024)
-			read, err := conn.Read(b)
+			// over the socket, continuously read the command and print it out
+			cmd, err := readCommand(c)
 			if err != nil {
-				err := conn.Close()
-				fmt.Println("Connection closed!")
-				if err != nil {
-					return err
+				c.Close()
+				con_clients -= 1
+				log.Println("client disconnected", c.RemoteAddr(), "concurrent clients", con_clients)
+				if err == io.EOF {
+					break
 				}
-				return errors.Unwrap(err)
+				log.Println("err", err)
 			}
-
-			fmt.Printf("Read command %s", string(rune(read)))
-
-			write, err := conn.Write(b)
-			if err != nil {
-				return err
+			log.Println("command", cmd)
+			if err = respond(cmd, c); err != nil {
+				log.Print("err write:", err)
 			}
-
-			fmt.Printf("Command written to pipeline %s", write)
 		}
 	}
 }

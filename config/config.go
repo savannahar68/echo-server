@@ -1,7 +1,4 @@
 package config
 
-type Server struct {
-	Port            int
-	IncomingRequest string
-	Type            string
-}
+var Host string = "0.0.0.0"
+var Port int = 7379
