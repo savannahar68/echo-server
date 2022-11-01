@@ -1,0 +1,133 @@
+package server
+
+import (
+	"io"
+	"log"
+	"net"
+	"syscall"
+
+	"github.com/savannahar68/echo-server/config"
+	"github.com/savannahar68/echo-server/core"
+)
+
+var conClients = 0
+
+func RunAsyncTCPServer() {
+	log.Println("Starting an asynchronous server on ", config.Host, config.Port)
+	maxClients := 20000
+
+	events := make([]syscall.Kevent_t, maxClients)
+
+	// create a socket
+	serverFd, err := syscall.Socket(syscall.AF_INET, syscall.O_NONBLOCK|syscall.SOCK_STREAM, 0)
+
+	if err != nil {
+		println("Err", err)
+		panic(err)
+	}
+
+	defer func(fd int) {
+		err := syscall.Close(fd)
+		if err != nil {
+
+		}
+	}(serverFd)
+
+	// set the server socket as non-blocking
+	err = syscall.SetNonblock(serverFd, true)
+	if err != nil {
+		panic(err)
+	}
+
+	// Bind the IP and Port
+	ip4 := net.ParseIP(config.Host)
+	err = syscall.Bind(serverFd, &syscall.SockaddrInet4{
+		Port: config.Port,
+		Addr: [4]byte{ip4[0], ip4[1], ip4[2], ip4[3]},
+	})
+	if err != nil {
+		panic(err)
+	}
+
+	// start listening on socket
+	err = syscall.Listen(serverFd, maxClients)
+	if err != nil {
+		panic(err)
+	}
+
+	// Async io - event loop start
+
+	// create KQueue
+	kqFd, err := syscall.Kqueue()
+	if err != nil {
+		log.Println("Error creating Kqueue descriptor!")
+		panic(err)
+	}
+	defer syscall.Close(kqFd)
+
+	socketServerEvent := syscall.Kevent_t{
+		Ident:  uint64(serverFd),
+		Filter: syscall.EVFILT_READ,
+		Flags:  syscall.EV_ADD | syscall.EV_ENABLE,
+	}
+
+	// Listen to read events on the Server itself
+	if changeEventRegistered, err := syscall.Kevent(kqFd, []syscall.Kevent_t{socketServerEvent}, nil, nil); err != nil || changeEventRegistered == -1 {
+		panic(err)
+	}
+
+	for {
+		nevents, err := syscall.Kevent(kqFd, nil, events, nil)
+		if err != nil {
+			continue
+		}
+
+		for i := 0; i < nevents; i++ {
+
+			// accept incoming events
+			if events[i].Ident == uint64(serverFd) {
+				fd, _, err := syscall.Accept(serverFd)
+				if err != nil {
+					panic(err)
+				}
+
+				conClients++
+				err = syscall.SetNonblock(fd, true)
+				if err != nil {
+					return
+				}
+
+				// add this TCP connection to be monitored
+				socketClientEvent := syscall.Kevent_t{
+					Ident:  uint64(fd),
+					Filter: syscall.EVFILT_READ,
+					Flags:  syscall.EV_ADD | syscall.EV_ENABLE,
+				}
+
+				if changeEventRegistered, err := syscall.Kevent(kqFd, []syscall.Kevent_t{socketClientEvent}, nil, nil); err != nil || changeEventRegistered == -1 {
+					panic(err)
+				}
+			} else {
+				comm := core.FDComm{FD: int(events[i].Ident)}
+				cmd, err := readCommand(comm)
+				if err != nil {
+					err := syscall.Close(int(events[i].Ident))
+					if err != nil {
+						return
+					}
+					conClients -= 1
+					if err == io.EOF {
+						break
+					}
+					log.Println("err", err)
+				}
+				log.Println("command", cmd)
+				if err = respond(*cmd, comm); err != nil {
+					log.Print("err write:", err)
+				}
+			}
+
+		}
+	}
+
+}
