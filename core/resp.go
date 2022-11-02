@@ -13,6 +13,10 @@ func DecodeArrayString(data []byte) ([]string, error) {
 		return nil, err
 	}
 
+	if value == nil {
+		return nil, errors.New("no data")
+	}
+
 	ts := value.([]interface{})
 	tokens := make([]string, len(ts))
 

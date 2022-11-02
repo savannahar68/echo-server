@@ -19,7 +19,7 @@ func RunAsyncTCPServer() {
 	events := make([]syscall.Kevent_t, maxClients)
 
 	// create a socket
-	serverFd, err := syscall.Socket(syscall.AF_INET, syscall.O_NONBLOCK|syscall.SOCK_STREAM, 0)
+	serverFd, err := syscall.Socket(syscall.AF_INET, syscall.SOCK_STREAM, 0)
 
 	if err != nil {
 		println("Err", err)
@@ -120,10 +120,11 @@ func RunAsyncTCPServer() {
 						break
 					}
 					log.Println("err", err)
-				}
-				log.Println("command", cmd)
-				if err = respond(*cmd, comm); err != nil {
-					log.Print("err write:", err)
+				} else {
+					log.Println("command", cmd)
+					if err = respond(*cmd, comm); err != nil {
+						log.Print("err write:", err)
+					}
 				}
 			}
 
