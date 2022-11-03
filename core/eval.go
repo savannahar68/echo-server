@@ -103,7 +103,18 @@ func evalTTL(args []string, c io.ReadWriter) error {
 		return errors.New("(error) Key doesn't exist")
 	}
 
+	if obj.ExpiresAt == -1 {
+		_, err := c.Write([]byte(":-1\r\n"))
+		return err
+	}
+
 	ttlDifference := obj.ExpiresAt - time.Now().UnixMilli()
+
+	if ttlDifference < 0 {
+		_, err := c.Write([]byte(":-2\r\n"))
+		return err
+	}
+
 	_, err := c.Write([]byte(fmt.Sprintf(":%d\r\n", int(math.Round(float64(ttlDifference/1000))))))
 	return err
 }
