@@ -5,12 +5,15 @@ import (
 	"log"
 	"net"
 	"syscall"
+	"time"
 
 	"github.com/savannahar68/echo-server/config"
 	"github.com/savannahar68/echo-server/core"
 )
 
 var conClients = 0
+var cronFrequency = 1 * time.Second
+var lastCronExecutionTime = time.Now()
 
 func RunAsyncTCPServer() {
 	log.Println("Starting an asynchronous server on ", config.Host, config.Port)
@@ -77,6 +80,12 @@ func RunAsyncTCPServer() {
 	}
 
 	for {
+
+		if time.Now().After(lastCronExecutionTime.Add(cronFrequency)) {
+			core.DeleteExpiredKeys()
+			lastCronExecutionTime = time.Now()
+		}
+
 		nevents, err := syscall.Kevent(kqFd, nil, events, nil)
 		if err != nil {
 			continue

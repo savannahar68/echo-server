@@ -31,3 +31,11 @@ func Put(key string, obj *Obj) {
 func Get(key string) *Obj {
 	return store[key]
 }
+
+func Del(key string) bool {
+	if _, ok := store[key]; ok {
+		delete(store, key)
+		return true
+	}
+	return false
+}

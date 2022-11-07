@@ -19,6 +19,10 @@ func EvalAndRespond(cmd RedisCmd, c io.ReadWriter) error {
 		return evalSET(cmd.Args, c)
 	case "TTL":
 		return evalTTL(cmd.Args, c)
+	case "DEL":
+		return evalDEL(cmd.Args, c)
+	case "EXPIRE":
+		return evalEXPIRE(cmd.Args, c)
 	default:
 		return evalPing(cmd.Args, c)
 	}
@@ -53,6 +57,7 @@ func evalGET(args []string, c io.ReadWriter) error {
 	}
 
 	if obj.ExpiresAt != -1 && time.Now().UnixMilli() > obj.ExpiresAt {
+		delete(store, args[0])
 		return errors.New("(error) Key Expired")
 	}
 
@@ -116,5 +121,47 @@ func evalTTL(args []string, c io.ReadWriter) error {
 	}
 
 	_, err := c.Write([]byte(fmt.Sprintf(":%d\r\n", int(math.Round(float64(ttlDifference/1000))))))
+	return err
+}
+
+func evalDEL(args []string, c io.ReadWriter) error {
+	if len(args) == 0 {
+		return errors.New("(error) wrong number of arguments for DEL command")
+	}
+
+	var countDeleted int = 0
+
+	for _, key := range args {
+		if ok := Del(key); ok {
+			countDeleted++
+		}
+	}
+	_, err := c.Write(Encode(countDeleted, false))
+	return err
+}
+
+func evalEXPIRE(args []string, c io.ReadWriter) error {
+	if len(args) <= 1 {
+		return errors.New("(error) wrong number of arguments for EXPIRE command")
+	}
+
+	obj := Get(args[0])
+	if obj == nil {
+		_, err := c.Write([]byte(":0\r\n"))
+		return err
+	}
+
+	if obj.ExpiresAt != -1 && obj.ExpiresAt < 0 {
+		c.Write(Encode(0, false))
+		return nil
+	}
+
+	exDurationSec, err := strconv.ParseInt(args[1], 10, 64)
+	if err != nil {
+		return errors.New("(error) ERR value is not an integer or out of range")
+	}
+
+	obj.ExpiresAt = time.Now().UnixMilli() + exDurationSec*1000
+	_, err = c.Write(Encode(1, false))
 	return err
 }
