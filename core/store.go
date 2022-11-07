@@ -1,6 +1,10 @@
 package core
 
-import "time"
+import (
+	"time"
+
+	"github.com/savannahar68/echo-server/config"
+)
 
 type Obj struct {
 	Value     interface{}
@@ -25,6 +29,9 @@ func NewObj(value interface{}, expires int64) *Obj {
 }
 
 func Put(key string, obj *Obj) {
+	if len(store) >= config.KeysLimit {
+		Evict()
+	}
 	store[key] = obj
 }
 
