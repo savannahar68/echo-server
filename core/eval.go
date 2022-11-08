@@ -1,6 +1,7 @@
 package core
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -9,30 +10,35 @@ import (
 	"time"
 )
 
-func EvalAndRespond(cmd RedisCmd, c io.ReadWriter) error {
-	switch cmd.Cmd {
-	case "Ping":
-		return evalPing(cmd.Args, c)
-	case "GET":
-		return evalGET(cmd.Args, c)
-	case "SET":
-		return evalSET(cmd.Args, c)
-	case "TTL":
-		return evalTTL(cmd.Args, c)
-	case "DEL":
-		return evalDEL(cmd.Args, c)
-	case "EXPIRE":
-		return evalEXPIRE(cmd.Args, c)
-	default:
-		return evalPing(cmd.Args, c)
+func EvalAndRespond(cmds RedisCmds, c io.ReadWriter) {
+	var response []byte
+	buf := bytes.NewBuffer(response)
+	for _, cmd := range cmds {
+		switch cmd.Cmd {
+		case "Ping":
+			buf.Write(evalPing(cmd.Args))
+		case "GET":
+			buf.Write(evalGET(cmd.Args))
+		case "SET":
+			buf.Write(evalSET(cmd.Args))
+		case "TTL":
+			buf.Write(evalTTL(cmd.Args))
+		case "DEL":
+			buf.Write(evalDEL(cmd.Args))
+		case "EXPIRE":
+			buf.Write(evalEXPIRE(cmd.Args))
+		default:
+			buf.Write(evalPing(cmd.Args))
+		}
 	}
+	c.Write(buf.Bytes())
 }
 
-func evalPing(args []string, c io.ReadWriter) error {
+func evalPing(args []string) []byte {
 	var b []byte
 
 	if len(args) >= 2 {
-		return errors.New("ERR wrong number of arguments for PING command")
+		return Encode(errors.New("ERR wrong number of arguments for PING command"), false)
 	}
 
 	if len(args) == 0 {
@@ -41,33 +47,30 @@ func evalPing(args []string, c io.ReadWriter) error {
 		b = Encode(args[0], false)
 	}
 
-	_, err := c.Write(b)
-	return err
+	return b
 }
 
-func evalGET(args []string, c io.ReadWriter) error {
+func evalGET(args []string) []byte {
 	if len(args) == 0 {
-		return errors.New("(error) wrong number of arguments for GET command")
+		return Encode(errors.New("(error) wrong number of arguments for GET command"), false)
 	}
 
 	obj := Get(args[0])
 	if obj == nil {
-		_, err := c.Write([]byte("+nil\r\n"))
-		return err
+		return []byte("+nil\r\n")
 	}
 
 	if obj.ExpiresAt != -1 && time.Now().UnixMilli() > obj.ExpiresAt {
 		delete(store, args[0])
-		return errors.New("(error) Key Expired")
+		return Encode(errors.New("(error) Key Expired"), false)
 	}
 
-	_, err := c.Write(Encode(obj.Value, false))
-	return err
+	return Encode(obj.Value, false)
 }
 
-func evalSET(args []string, c io.ReadWriter) error {
+func evalSET(args []string) []byte {
 	if len(args) <= 1 {
-		return errors.New("(error) wrong number of arguments for SET command")
+		return Encode(errors.New("(error) wrong number of arguments for SET command"), false)
 	}
 
 	var key, value string
@@ -80,53 +83,49 @@ func evalSET(args []string, c io.ReadWriter) error {
 		case "EX", "ex":
 			i++
 			if i == len(args) {
-				return errors.New("(error) Invalid syntax error")
+				return Encode(errors.New("(error) Invalid syntax error"), false)
 			}
 
 			exDurationSec, err := strconv.ParseInt(args[i], 10, 64)
 			if err != nil {
-				return errors.New("ERR value is not an integer or out of range")
+				return Encode(errors.New("ERR value is not an integer or out of range"), false)
 			}
 			exDurationMs = exDurationSec * 1000
 		default:
-			return errors.New("(error) Invalid syntax")
+			return Encode(errors.New("(error) Invalid syntax"), false)
 		}
 	}
 	// putting key and value in hash table
 	Put(key, NewObj(value, exDurationMs))
-	_, err := c.Write([]byte("+OK\r\n"))
-	return err
+	return []byte("+OK\r\n")
 }
 
-func evalTTL(args []string, c io.ReadWriter) error {
+func evalTTL(args []string) []byte {
 	if len(args) == 0 {
-		return errors.New("(error) wrong number of arguments for TTL command")
+		return Encode(errors.New("(error) wrong number of arguments for TTL command"), false)
 	}
 
 	obj := Get(args[0])
 	if obj == nil {
-		return errors.New("(error) Key doesn't exist")
+		return Encode(errors.New("(error) Key doesn't exist"), false)
 	}
 
 	if obj.ExpiresAt == -1 {
-		_, err := c.Write([]byte(":-1\r\n"))
-		return err
+		return []byte(":-1\r\n")
 	}
 
 	ttlDifference := obj.ExpiresAt - time.Now().UnixMilli()
 
 	if ttlDifference < 0 {
-		_, err := c.Write([]byte(":-2\r\n"))
-		return err
+		return []byte(":-2\r\n")
 	}
 
-	_, err := c.Write([]byte(fmt.Sprintf(":%d\r\n", int(math.Round(float64(ttlDifference/1000))))))
-	return err
+	return []byte(fmt.Sprintf(":%d\r\n", int(math.Round(float64(ttlDifference/1000)))))
 }
 
-func evalDEL(args []string, c io.ReadWriter) error {
+func evalDEL(args []string) []byte {
 	if len(args) == 0 {
-		return errors.New("(error) wrong number of arguments for DEL command")
+		return Encode(errors.New("(error) wrong number of arguments for DEL command"), false)
 	}
 
 	var countDeleted int = 0
@@ -136,32 +135,28 @@ func evalDEL(args []string, c io.ReadWriter) error {
 			countDeleted++
 		}
 	}
-	_, err := c.Write(Encode(countDeleted, false))
-	return err
+	return Encode(countDeleted, false)
 }
 
-func evalEXPIRE(args []string, c io.ReadWriter) error {
+func evalEXPIRE(args []string) []byte {
 	if len(args) <= 1 {
-		return errors.New("(error) wrong number of arguments for EXPIRE command")
+		return Encode(errors.New("(error) wrong number of arguments for EXPIRE command"), false)
 	}
 
 	obj := Get(args[0])
 	if obj == nil {
-		_, err := c.Write([]byte(":0\r\n"))
-		return err
+		return []byte(":0\r\n")
 	}
 
 	if obj.ExpiresAt != -1 && obj.ExpiresAt < 0 {
-		c.Write(Encode(0, false))
-		return nil
+		return Encode(0, false)
 	}
 
 	exDurationSec, err := strconv.ParseInt(args[1], 10, 64)
 	if err != nil {
-		return errors.New("(error) ERR value is not an integer or out of range")
+		return Encode(errors.New("(error) ERR value is not an integer or out of range"), false)
 	}
 
 	obj.ExpiresAt = time.Now().UnixMilli() + exDurationSec*1000
-	_, err = c.Write(Encode(1, false))
-	return err
+	return Encode(1, false)
 }

@@ -17,7 +17,7 @@ func DecodeArrayString(data []byte) ([]string, error) {
 		return nil, errors.New("no data")
 	}
 
-	ts := value.([]interface{})
+	ts := value[0].([]interface{})
 	tokens := make([]string, len(ts))
 
 	for i := range tokens {
@@ -26,14 +26,23 @@ func DecodeArrayString(data []byte) ([]string, error) {
 	return tokens, nil
 }
 
-func Decode(data []byte) (interface{}, error) {
+func Decode(data []byte) ([]interface{}, error) {
 	if len(data) == 0 {
 		return nil, errors.New("no data")
 	}
 
-	// the 2nd value is delta which indicates the length uptil which encoding has happened
-	value, _, err := DecodeOne(data)
-	return value, err
+	var values []interface{} = make([]interface{}, 0)
+	var index int = 0
+
+	for index < len(data) {
+		value, delta, err := DecodeOne(data[index:])
+		if err != nil {
+			return values, err
+		}
+		index = index + delta
+		values = append(values, value)
+	}
+	return values, nil
 }
 
 // DecodeOne decode only the 1st value
@@ -154,6 +163,8 @@ func Encode(value interface{}, isSimple bool) []byte {
 		return []byte(fmt.Sprintf("$%d\r\n%s\r\n", len(v), v))
 	case int, int8, int16, int32, int64:
 		return []byte(fmt.Sprintf(":%d\r\n", v))
+	case error:
+		return []byte(fmt.Sprintf("-%s\r\n", v))
 	}
 	return []byte{}
 }

@@ -80,7 +80,7 @@ func RunAsyncTCPServer() {
 	}
 
 	for {
-
+		// Active delete of expired keys
 		if time.Now().After(lastCronExecutionTime.Add(cronFrequency)) {
 			core.DeleteExpiredKeys()
 			lastCronExecutionTime = time.Now()
@@ -118,7 +118,7 @@ func RunAsyncTCPServer() {
 				}
 			} else {
 				comm := core.FDComm{FD: int(events[i].Ident)}
-				cmd, err := readCommand(comm)
+				cmds, err := readCommands(comm)
 				if err != nil {
 					err := syscall.Close(int(events[i].Ident))
 					if err != nil {
@@ -130,10 +130,8 @@ func RunAsyncTCPServer() {
 					}
 					log.Println("err", err)
 				} else {
-					log.Println("command", cmd)
-					if err = respond(*cmd, comm); err != nil {
-						log.Print("err write:", err)
-					}
+					log.Println("command", cmds)
+					respond(cmds, comm)
 				}
 			}
 
