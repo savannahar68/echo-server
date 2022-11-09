@@ -10,6 +10,14 @@ import (
 	"time"
 )
 
+var RESP_NIL []byte = []byte("$-1\r\n")
+var RESP_OK []byte = []byte("+OK\r\n")
+var RESP_QUEUED []byte = []byte("+QUEUED\r\n")
+var RESP_ZERO []byte = []byte(":0\r\n")
+var RESP_ONE []byte = []byte(":1\r\n")
+var RESP_MINUS_1 []byte = []byte(":-1\r\n")
+var RESP_MINUS_2 []byte = []byte(":-2\r\n")
+
 func EvalAndRespond(cmds RedisCmds, c io.ReadWriter) {
 	var response []byte
 	buf := bytes.NewBuffer(response)
@@ -27,6 +35,10 @@ func EvalAndRespond(cmds RedisCmds, c io.ReadWriter) {
 			buf.Write(evalDEL(cmd.Args))
 		case "EXPIRE":
 			buf.Write(evalEXPIRE(cmd.Args))
+		case "BGREWRITEAOF":
+			buf.Write(evalBGREWRITEAOF(cmd.Args))
+		case "INCR":
+			buf.Write(evalINCR(cmd.Args))
 		default:
 			buf.Write(evalPing(cmd.Args))
 		}
@@ -77,6 +89,7 @@ func evalSET(args []string) []byte {
 	// Don't expire
 	var exDurationMs int64 = -1
 	key, value = args[0], args[1]
+	oType, oEnc := DeduceTypeEncoding(value)
 
 	for i := 2; i < len(args); i++ {
 		switch args[i] {
@@ -96,7 +109,7 @@ func evalSET(args []string) []byte {
 		}
 	}
 	// putting key and value in hash table
-	Put(key, NewObj(value, exDurationMs))
+	Put(key, NewObj(value, exDurationMs, oType, oEnc))
 	return []byte("+OK\r\n")
 }
 
@@ -159,4 +172,36 @@ func evalEXPIRE(args []string) []byte {
 
 	obj.ExpiresAt = time.Now().UnixMilli() + exDurationSec*1000
 	return Encode(1, false)
+}
+
+// TODO: make it asnyc by forking process
+func evalBGREWRITEAOF(args []string) []byte {
+	DumpAllAOF()
+	return RESP_OK
+}
+
+func evalINCR(args []string) []byte {
+	if len(args) == 0 {
+		return Encode(errors.New("(error) wrong number of arguments for INCR command"), false)
+	}
+
+	obj := Get(args[0])
+	if obj == nil {
+		obj = NewObj("0", -1, OBJ_TYPE_STRING, OBJ_ENCODING_INT)
+		Put(args[0], obj)
+	}
+
+	if err := AssertType(obj.TypeEncoding, OBJ_TYPE_STRING); err != nil {
+		return Encode(err, false)
+	}
+
+	if err := AssertEncoding(obj.TypeEncoding, OBJ_ENCODING_INT); err != nil {
+		return Encode(err, false)
+	}
+
+	i, _ := strconv.ParseInt(obj.Value.(string), 10, 64)
+	i++
+	obj.Value = strconv.FormatInt(i, 10)
+
+	return Encode(i, false)
 }

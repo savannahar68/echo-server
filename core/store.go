@@ -6,25 +6,21 @@ import (
 	"github.com/savannahar68/echo-server/config"
 )
 
-type Obj struct {
-	Value     interface{}
-	ExpiresAt int64
-}
-
 var store map[string]*Obj
 
 func init() {
 	store = make(map[string]*Obj)
 }
 
-func NewObj(value interface{}, expires int64) *Obj {
+func NewObj(value interface{}, expires int64, oType uint8, oEnc uint8) *Obj {
 	var expiresAt int64 = -1
 	if expires > 0 {
 		expiresAt = time.Now().UnixMilli() + expires
 	}
 	return &Obj{
-		Value:     value,
-		ExpiresAt: expiresAt,
+		TypeEncoding: oType | oEnc,
+		Value:        value,
+		ExpiresAt:    expiresAt,
 	}
 }
 
