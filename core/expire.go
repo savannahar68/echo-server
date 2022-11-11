@@ -1,39 +1,56 @@
 package core
 
 import (
-	"fmt"
 	"time"
 )
 
-func expireSample() float32 {
-	var limit = 20
-	var expiredCount = 0
+func HasExpired(obj *Obj) bool {
+	exp, ok := expires[obj]
+	if !ok {
+		return false
+	}
+	return exp <= uint64(time.Now().UnixMilli())
+}
 
-	// range gets object in random order based on hash
+func getExpiry(obj *Obj) (uint64, bool) {
+	exp, ok := expires[obj]
+	return exp, ok
+}
+
+// TODO: Optimize
+//   - Sampling
+//   - Unnecessary iteration
+func expireSample() float32 {
+	var limit int = 20
+	var expiredCount int = 0
+
+	// assuming iteration of golang hash table in randomized
 	for key, obj := range store {
-		if obj.ExpiresAt != -1 {
-			limit--
-			if obj.ExpiresAt <= time.Now().UnixMilli() {
-				delete(store, key)
-				expiredCount++
-			}
+		limit--
+		if HasExpired(obj) {
+			Del(key)
+			expiredCount++
 		}
-		//once we have limit = 20 we have some our expiration set
-		if limit == 20 {
+
+		// once we iterated to 20 keys that have some expiration set
+		// we break the loop
+		if limit == 0 {
 			break
 		}
 	}
 
-	return float32(expiredCount) / float32(limit)
+	return float32(expiredCount) / float32(20.0)
 }
 
+// Deletes all the expired keys - the active way
+// Sampling approach: https://redis.io/commands/expire/
 func DeleteExpiredKeys() {
 	for {
 		frac := expireSample()
-
+		// if the sample had less than 25% keys expired
+		// we break the loop.
 		if frac < 0.25 {
 			break
 		}
 	}
-	fmt.Println("deleted expired but undeleted keys. total number of keys is ", len(store))
 }

@@ -39,6 +39,12 @@ func EvalAndRespond(cmds RedisCmds, c io.ReadWriter) {
 			buf.Write(evalBGREWRITEAOF(cmd.Args))
 		case "INCR":
 			buf.Write(evalINCR(cmd.Args))
+		case "INFO":
+			buf.Write(evalINFO(cmd.Args))
+		case "CLIENT":
+			buf.Write(evalCLIENT(cmd.Args))
+		case "LATENCY":
+			buf.Write(evalLATENCY(cmd.Args))
 		default:
 			buf.Write(evalPing(cmd.Args))
 		}
@@ -72,9 +78,8 @@ func evalGET(args []string) []byte {
 		return []byte("+nil\r\n")
 	}
 
-	if obj.ExpiresAt != -1 && time.Now().UnixMilli() > obj.ExpiresAt {
-		delete(store, args[0])
-		return Encode(errors.New("(error) Key Expired"), false)
+	if HasExpired(obj) {
+		return RESP_NIL
 	}
 
 	return Encode(obj.Value, false)
@@ -123,17 +128,16 @@ func evalTTL(args []string) []byte {
 		return Encode(errors.New("(error) Key doesn't exist"), false)
 	}
 
-	if obj.ExpiresAt == -1 {
-		return []byte(":-1\r\n")
+	exp, isExpireSet := expires[obj]
+	if !isExpireSet {
+		return RESP_MINUS_1
 	}
 
-	ttlDifference := obj.ExpiresAt - time.Now().UnixMilli()
-
-	if ttlDifference < 0 {
-		return []byte(":-2\r\n")
+	if uint64(time.Now().UnixMilli()) > exp {
+		return RESP_MINUS_2
 	}
-
-	return []byte(fmt.Sprintf(":%d\r\n", int(math.Round(float64(ttlDifference/1000)))))
+	durationMs := exp - uint64(time.Now().UnixMilli())
+	return []byte(fmt.Sprintf(":%d\r\n", int(math.Round(float64(durationMs/1000)))))
 }
 
 func evalDEL(args []string) []byte {
@@ -156,21 +160,18 @@ func evalEXPIRE(args []string) []byte {
 		return Encode(errors.New("(error) wrong number of arguments for EXPIRE command"), false)
 	}
 
-	obj := Get(args[0])
-	if obj == nil {
-		return []byte(":0\r\n")
-	}
-
-	if obj.ExpiresAt != -1 && obj.ExpiresAt < 0 {
-		return Encode(0, false)
-	}
-
 	exDurationSec, err := strconv.ParseInt(args[1], 10, 64)
 	if err != nil {
 		return Encode(errors.New("(error) ERR value is not an integer or out of range"), false)
 	}
 
-	obj.ExpiresAt = time.Now().UnixMilli() + exDurationSec*1000
+	obj := Get(args[0])
+	if obj == nil {
+		return RESP_ZERO
+	}
+
+	SetExpiry(obj, exDurationSec*1000)
+
 	return Encode(1, false)
 }
 
@@ -204,4 +205,22 @@ func evalINCR(args []string) []byte {
 	obj.Value = strconv.FormatInt(i, 10)
 
 	return Encode(i, false)
+}
+
+func evalINFO(args []string) []byte {
+	var info []byte
+	buf := bytes.NewBuffer(info)
+	buf.WriteString("# Keyspace\r\n")
+	for i := range KeyspaceStat {
+		buf.WriteString(fmt.Sprintf("db%d:keys=%d,expires=0,avg_ttl=0\r\n", i, KeyspaceStat[i]["keys"]))
+	}
+	return Encode(buf.String(), false)
+}
+
+func evalCLIENT(args []string) []byte {
+	return RESP_OK
+}
+
+func evalLATENCY(args []string) []byte {
+	return Encode([]string{}, false)
 }
