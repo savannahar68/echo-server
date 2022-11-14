@@ -4,6 +4,9 @@ import (
 	"io"
 	"log"
 	"net"
+	"os"
+	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -15,7 +18,18 @@ var conClients = 0
 var cronFrequency = 1 * time.Second
 var lastCronExecutionTime = time.Now()
 
-func RunAsyncTCPServer() {
+const EngineStatus_WAITING int32 = 1 << 1
+const EngineStatus_BUSY int32 = 1 << 2
+const EngineStatus_SHUTTING_DOWN int32 = 1 << 3
+
+var eStatus int32 = EngineStatus_WAITING
+
+func RunAsyncTCPServer(wg *sync.WaitGroup) {
+	defer wg.Done()
+	defer func() {
+		atomic.StoreInt32(&eStatus, EngineStatus_SHUTTING_DOWN)
+	}()
+
 	log.Println("Starting an asynchronous server on ", config.Host, config.Port)
 	maxClients := 20000
 
@@ -79,7 +93,8 @@ func RunAsyncTCPServer() {
 		panic(err)
 	}
 
-	for {
+	for atomic.LoadInt32(&eStatus) != EngineStatus_SHUTTING_DOWN {
+
 		// Active delete of expired keys
 		if time.Now().After(lastCronExecutionTime.Add(cronFrequency)) {
 			core.DeleteExpiredKeys()
@@ -89,6 +104,13 @@ func RunAsyncTCPServer() {
 		nevents, err := syscall.Kevent(kqFd, nil, events, nil)
 		if err != nil {
 			continue
+		}
+
+		if !atomic.CompareAndSwapInt32(&eStatus, EngineStatus_WAITING, EngineStatus_BUSY) {
+			switch eStatus {
+			case EngineStatus_SHUTTING_DOWN:
+				return
+			}
 		}
 
 		for i := 0; i < nevents; i++ {
@@ -136,6 +158,25 @@ func RunAsyncTCPServer() {
 			}
 
 		}
+
+		// Waiting for next event
+		atomic.StoreInt32(&eStatus, EngineStatus_WAITING)
 	}
 
+}
+
+func WaitForSignal(wg *sync.WaitGroup, sigs chan os.Signal) {
+	defer wg.Done()
+	<-sigs
+
+	// Wait for existing command and then shut down
+
+	// If server is busy wait
+	for atomic.LoadInt32(&eStatus) == EngineStatus_BUSY {
+	}
+
+	atomic.StoreInt32(&eStatus, EngineStatus_SHUTTING_DOWN)
+
+	core.Shutdown()
+	os.Exit(0)
 }
