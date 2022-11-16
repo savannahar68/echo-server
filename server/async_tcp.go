@@ -21,8 +21,15 @@ var lastCronExecutionTime = time.Now()
 const EngineStatus_WAITING int32 = 1 << 1
 const EngineStatus_BUSY int32 = 1 << 2
 const EngineStatus_SHUTTING_DOWN int32 = 1 << 3
+const EngineStatus_TRANSACTION int32 = 1 << 4
 
 var eStatus int32 = EngineStatus_WAITING
+
+var connectedClients map[int]*core.Client
+
+func init() {
+	connectedClients = make(map[int]*core.Client)
+}
 
 func RunAsyncTCPServer(wg *sync.WaitGroup) {
 	defer wg.Done()
@@ -122,6 +129,8 @@ func RunAsyncTCPServer(wg *sync.WaitGroup) {
 					panic(err)
 				}
 
+				connectedClients[fd] = core.NewClient(fd)
+
 				conClients++
 				err = syscall.SetNonblock(fd, true)
 				if err != nil {
@@ -139,10 +148,15 @@ func RunAsyncTCPServer(wg *sync.WaitGroup) {
 					panic(err)
 				}
 			} else {
-				comm := core.FDComm{FD: int(events[i].Ident)}
+				comm := connectedClients[int(events[i].Ident)]
+				if comm == nil {
+					return
+				}
 				cmds, err := readCommands(comm)
 				if err != nil {
 					err := syscall.Close(int(events[i].Ident))
+					delete(connectedClients, int(events[i].Ident))
+
 					if err != nil {
 						return
 					}
@@ -153,7 +167,7 @@ func RunAsyncTCPServer(wg *sync.WaitGroup) {
 					log.Println("err", err)
 				} else {
 					log.Println("command", cmds)
-					respond(cmds, comm)
+					respond(cmds, *comm)
 				}
 			}
 
