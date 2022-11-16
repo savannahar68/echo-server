@@ -67,8 +67,8 @@ func respondError(err error, c io.ReadWriter) {
 	c.Write([]byte(fmt.Sprintf("-%s\r\n", err)))
 }
 
-func respond(cmds core.RedisCmds, c core.Client) {
-	core.EvalAndRespond(cmds, &c)
+func respond(cmds core.RedisCmds, c *core.Client) {
+	core.EvalAndRespond(cmds, c)
 }
 
 //

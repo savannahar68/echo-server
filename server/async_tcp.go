@@ -167,7 +167,7 @@ func RunAsyncTCPServer(wg *sync.WaitGroup) {
 					log.Println("err", err)
 				} else {
 					log.Println("command", cmds)
-					respond(cmds, *comm)
+					respond(cmds, comm)
 				}
 			}
 
